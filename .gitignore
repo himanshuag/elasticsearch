@@ -1,6 +1,8 @@
 .idea/
 .gradle/
 *.iml
+*.ipr
+*.iws
 work/
 /data/
 logs/
@@ -11,26 +13,21 @@ target/
 docs/html/
 docs/build.log
 /tmp/
+backwards/
+html_docs
+.vagrant/
 
 ## eclipse ignores (use 'mvn eclipse:eclipse' to build eclipse projects)
-## The only configuration files which are not ignored are certain files in
-## .settings (as listed below) since these files ensure common coding 
-## style across Eclipse and IDEA.
-## Other files (.project, .classpath) should be generated through Maven which
-## will correctly set the classpath based on the declared dependencies.
+## All files (.project, .classpath, .settings/*) should be generated through Maven which
+## will correctly set the classpath based on the declared dependencies and write settings
+## files to ensure common coding style across Eclipse and IDEA.
 .project
 .classpath
 eclipse-build
-*/.project
-*/.classpath
-*/eclipse-build
-/.settings/
-!/.settings/org.eclipse.core.resources.prefs
-!/.settings/org.eclipse.jdt.core.prefs
-!/.settings/org.eclipse.jdt.ui.prefs
+.settings
 
 ## netbeans ignores
 nb-configuration.xml
 nbactions.xml
 
-/dependency-reduced-pom.xml
+dependency-reduced-pom.xml
