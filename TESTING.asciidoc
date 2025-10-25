@@ -1,103 +1,231 @@
-[[Testing Framework Cheatsheet]]
+[[TestingFrameworkCheatsheet]]
 = Testing
 
 [partintro]
 
-Elasticsearch uses jUnit for testing, it also uses randomness in the
-tests, that can be set using a seed, the following is a cheatsheet of
-options for running the tests for ES.
+Elasticsearch uses JUnit for testing. It also generated random inputs into
+tests, either using a random seed, or one that is set via a system
+property. The following is a cheatsheet of options for running the
+Elasticsearch tests.
 
 == Creating packages
 
-To create a distribution without running the tests, simply run the
-following:
+To build a distribution for your local OS and print its output location upon completion, run:
 
 -----------------------------
-mvn clean package -DskipTests
+./gradlew localDistro
 -----------------------------
 
-== Other test options
+To create a platform-specific build, use the following depending on your
+operating system:
 
-To disable and enable network transport, set the `Des.node.mode`.
+-----------------------------
+./gradlew :distribution:archives:linux-tar:assemble
+./gradlew :distribution:archives:darwin(-aarch64)-tar:assemble
+./gradlew :distribution:archives:windows-zip:assemble
+-----------------------------
 
-Use network transport:
+You can build a Docker image with:
 
-------------------------------------
--Des.node.mode=network
-------------------------------------
+-----------------------------
+./gradlew build(Aarch64)DockerImage
+-----------------------------
 
-Use local transport (default since 1.3):
-
--------------------------------------
--Des.node.mode=local
--------------------------------------
-
-Alternatively, you can set the `ES_TEST_LOCAL` environment variable:
-
--------------------------------------
-export ES_TEST_LOCAL=true && mvn test
--------------------------------------
+Note: you almost certainly don't want to run `./gradlew assemble` as this
+will attempt build every single Elasticsearch distribution.
 
 === Running Elasticsearch from a checkout
 
 In order to run Elasticsearch from source without building a package, you can
-run it using Maven:
+run it using Gradle:
 
 -------------------------------------
-./run.sh
+./gradlew run
 -------------------------------------
+
+==== Launching and debugging from an IDE
+
+If you want to run and debug Elasticsearch from your IDE, the `./gradlew run` task
+supports a remote debugging option. Start the "Debug Elasticsearch" run configuration in IntelliJ. This will enable the
+IDE to connect to the process and allow debug functionality.
+
+As such the IDE needs to be instructed to listen for connections on the debug port.
+Since we might run multiple JVMs as part of configuring and starting the cluster it's
+recommended to configure the IDE to initiate multiple listening attempts. In case of IntelliJ, this option
+is called "Auto restart" and needs to be checked.
+
+NOTE: If you have imported the project into IntelliJ according to the instructions in
+link:/CONTRIBUTING.md#importing-the-project-into-intellij-idea[CONTRIBUTING.md] then a debug run configuration
+named "Debug Elasticsearch" will be created for you and configured appropriately.
+
+Next run the following from your terminal:
+
+---------------------------------------------------------------------------
+./gradlew run --debug-jvm
+---------------------------------------------------------------------------
+
+===== Debugging the CLI launcher
+
+The gradle task does not start the Elasticsearch server process directly; like in the Elasticsearch distribution,
+the job of starting the server process is delegated to a launcher CLI tool. If you need to debug the launcher itself,
+add the following option to the `run` task:
+---------------------------------------------------------------------------
+./gradlew run --debug-cli-jvm
+---------------------------------------------------------------------------
+This option can be specified in isolation or combined with `--debug-jvm`. Since the CLI launcher lifespan may overlap
+with the server process lifespan, the CLI launcher process will be started on a different port (5107 for the first node,
+5108 and following for additional cluster nodes).
+
+As with the `--debug-jvm` command, the IDE needs to be instructed to listen for connections on the debug port.
+You need to configure and start an appropriate Remote JVM Debug configuration, e.g. by cloning and editing
+the "Debug Elasticsearch" run configuration to point to the correct debug port.
+
+==== Disabling assertions
+
+When running Elasticsearch with `./gradlew run`, assertions are enabled by
+default. To disable them, add the following command line option:
+
+-------------------------
+-Dtests.jvm.argline="-da -dsa"
+-------------------------
+
+==== Distribution
+
+By default a node is started with the zip distribution.
+In order to start with a different distribution use the `-Drun.distribution` argument.
+
+To for example start the open source distribution:
+
+-------------------------------------
+./gradlew run -Drun.distribution=oss
+-------------------------------------
+
+==== License type
+
+By default a node is started with the `basic` license type.
+In order to start with a different license type use the `-Drun.license_type` argument.
+
+In order to start a node with a trial license execute the following command:
+
+-------------------------------------
+./gradlew run -Drun.license_type=trial
+-------------------------------------
+
+This enables security and other paid features and adds a superuser with the username: `elastic-admin` and
+password: `elastic-password`.
+
+==== Other useful arguments
+
+- In order to start a node with a different max heap space add: `-Dtests.heap.size=4G`
+- In order to use a custom data directory: `--data-dir=/tmp/foo`
+- In order to preserve data in between executions: `--preserve-data`
+- In order to remotely attach a debugger to the server process: `--debug-jvm`
+- In order to remotely attach a debugger to the CLI launcher process: `--debug-cli-jvm`
+- In order to set a different keystore password: `--keystore-password`
+- In order to set an Elasticsearch setting, provide a setting with the following prefix: `-Dtests.es.`
+- In order to pass a JVM setting, e.g. to disable assertions: `-Dtests.jvm.argline="-da"`
+- In order to use HTTPS: ./gradlew run --https
+- In order to start a mock logging APM server on port 9999 and configure ES cluster to connect to it,
+use `./gradlew run --with-apm-server`
+
+==== Customizing the test cluster for ./gradlew run
+
+You may need to customize the cluster configuration for the ./gradlew run task.
+The settings can be set via the command line, but other options require updating the task itself.
+You can simply find the task in the source code and configure it there.
+(The task is currently defined in build-tools-internal/src/main/groovy/elasticsearch.run.gradle)
+However, this requires modifying a source controlled file and is subject to accidental commits.
+Alternatively, you can use a Gradle init script to inject custom build logic with the -I flag to configure this task locally.
+
+For example:
+
+To use a custom certificate for HTTPS with `./gradlew run`, you can do the following.
+Create a file (for example ~/custom-run.gradle) with the following contents:
+-------------------------------------
+rootProject {
+  if(project.name == 'elasticsearch') {
+    afterEvaluate {
+        testClusters.matching { it.name == "runTask"}.configureEach {
+          extraConfigFile 'http.p12', file("<path/to/file>/http.p12")
+        }
+    }
+  }
+}
+-------------------------------------
+Now tell Gradle to use this init script:
+-------------------------------------
+./gradlew run -I ~/custom-run.gradle \
+-Dtests.es.xpack.security.http.ssl.enabled=true \
+-Dtests.es.xpack.security.http.ssl.keystore.path=http.p12
+-------------------------------------
+
+Now the http.p12 file will be placed in the config directory of the running cluster and available for use.
+Assuming you have the http.ssl.keystore setup correctly, you can now use HTTPS with ./gradlew run without the risk
+of accidentally committing your local configurations.
+
+==== Multiple nodes in the test cluster for ./gradlew run
+
+Another desired customization for ./gradlew run might be to run multiple
+nodes with different setting for each node. For example, you may want to debug a coordinating only node that fans out
+to one or more data nodes. To do this, increase the numberOfNodes and add specific configuration for each
+of the nodes.  For example, the following will instruct the first node (:9200) to be a coordinating only node,
+and all other nodes to be master, data_hot, data_content nodes.
+-------------------------------------
+testClusters.register("runTask") {
+     ...
+    numberOfNodes = 2
+    def cluster = testClusters.named("runTask").get()
+    cluster.getNodes().each { node ->
+      node.setting('cluster.initial_master_nodes', cluster.getLastNode().getName())
+      node.setting('node.roles', '[master,data_hot,data_content]')
+    }
+    cluster.getFirstNode().setting('node.roles', '[]')
+   ...
+}
+-------------------------------------
+
+You can also place this config in custom init script (see above) to avoid accidental commits.
+If you are passing in the --debug-jvm flag with multiple nodes, you will need multiple remote debuggers running. One
+for each node listening at port 5007, 5008, 5009, and so on. Ensure that each remote debugger has auto restart enabled.
+
+==== Manually testing cross cluster search
+
+Use ./gradlew run-ccs to launch 2 clusters wired together for the purposes of cross cluster search.
+For example send a search request "my_remote_cluster:*/_search" to the querying cluster (:9200) to query data
+in the fulfilling cluster.
+
+If you are passing in the --debug-jvm flag, you will need two remote debuggers running. One at port 5007 and another
+one at port 5008. Ensure that each remote debugger has auto restart enabled.
 
 === Test case filtering.
 
-- `tests.class` is a class-filtering shell-like glob pattern,
-- `tests.method` is a method-filtering glob pattern.
+You can run a single test, provided that you specify the Gradle project. See the documentation on
+https://docs.gradle.org/current/userguide/userguide_single.html#simple_name_pattern[simple name pattern filtering].
 
-Run a single test case (variants)
+Run a single test case in the `server` project:
 
 ----------------------------------------------------------
-mvn test -Dtests.class=org.elasticsearch.package.ClassName
-mvn test "-Dtests.class=*.ClassName"
+./gradlew :server:test --tests org.elasticsearch.package.ClassName
 ----------------------------------------------------------
 
-Run all tests in a package and sub-packages
+Run all tests in a package and its sub-packages:
 
 ----------------------------------------------------
-mvn test "-Dtests.class=org.elasticsearch.package.*"
+./gradlew :server:test --tests 'org.elasticsearch.package.*'
 ----------------------------------------------------
 
-Run any test methods that contain 'esi' (like: ...r*esi*ze...).
-
--------------------------------
-mvn test "-Dtests.method=*esi*"
--------------------------------
-
-You can also filter tests by certain annotations ie:
-
-  * `@Nightly` - tests that only run in nightly builds (disabled by default)
-  * `@Backwards` - backwards compatibility tests (disabled by default)
-  * `@AwaitsFix` - tests that are waiting for a bugfix (disabled by default)
-  * `@BadApple` - tests that are known to fail randomly (disabled by default)
-
-Those annotation names can be combined into a filter expression like:
+Run all tests that are waiting for a bugfix (disabled by default)
 
 ------------------------------------------------
-mvn test -Dtests.filter="@nightly and not @backwards"
+./gradlew test -Dtests.filter=@awaitsfix
 ------------------------------------------------
-
-to run all nightly test but not the ones that are backwards tests. `tests.filter` supports
-the boolean operators `and, or, not` and grouping ie:
-
-
----------------------------------------------------------------
-mvn test -Dtests.filter="@nightly and not(@badapple or @backwards)"
----------------------------------------------------------------
 
 === Seed and repetitions.
 
 Run with a given seed (seed is a hex-encoded long).
 
 ------------------------------
-mvn test -Dtests.seed=DEADBEEF
+./gradlew test -Dtests.seed=DEADBEEF
 ------------------------------
 
 === Repeats _all_ tests of ClassName N times.
@@ -106,7 +234,7 @@ Every test repetition will have a different method seed
 (derived from a single random master seed).
 
 --------------------------------------------------
-mvn test -Dtests.iters=N -Dtests.class=*.ClassName
+./gradlew :server:test -Dtests.iters=N --tests org.elasticsearch.package.ClassName
 --------------------------------------------------
 
 === Repeats _all_ tests of ClassName N times.
@@ -115,7 +243,7 @@ Every test repetition will have exactly the same master (0xdead) and
 method-level (0xbeef) seed.
 
 ------------------------------------------------------------------------
-mvn test -Dtests.iters=N -Dtests.class=*.ClassName -Dtests.seed=DEAD:BEEF
+./gradlew :server:test -Dtests.iters=N -Dtests.seed=DEAD:BEEF --tests org.elasticsearch.package.ClassName
 ------------------------------------------------------------------------
 
 === Repeats a given test N times
@@ -125,14 +253,14 @@ ie: testFoo[0], testFoo[1], etc... so using testmethod or tests.method
 ending in a glob is necessary to ensure iterations are run).
 
 -------------------------------------------------------------------------
-mvn test -Dtests.iters=N -Dtests.class=*.ClassName -Dtests.method=mytest*
+./gradlew :server:test -Dtests.iters=N --tests org.elasticsearch.package.ClassName.methodName
 -------------------------------------------------------------------------
 
 Repeats N times but skips any tests after the first failure or M initial failures.
 
 -------------------------------------------------------------
-mvn test -Dtests.iters=N -Dtests.failfast=true -Dtestcase=...
-mvn test -Dtests.iters=N -Dtests.maxfailures=M -Dtestcase=...
+./gradlew test -Dtests.iters=N -Dtests.failfast=true ...
+./gradlew test -Dtests.iters=N -Dtests.maxfailures=M ...
 -------------------------------------------------------------
 
 === Test groups.
@@ -142,24 +270,29 @@ Test groups can be enabled or disabled (true/false).
 Default value provided below in [brackets].
 
 ------------------------------------------------------------------
-mvn test -Dtests.nightly=[false]   - nightly test group (@Nightly)
-mvn test -Dtests.weekly=[false]    - weekly tests (@Weekly)
-mvn test -Dtests.awaitsfix=[false] - known issue (@AwaitsFix)
+./gradlew test -Dtests.awaitsfix=[false] - known issue (@AwaitsFix)
 ------------------------------------------------------------------
 
 === Load balancing and caches.
 
-By default, the tests run sequentially on a single forked JVM.
-
-To run with more forked JVMs than the default use:
+By default the tests run on multiple processes using all the available cores on all
+available CPUs. Not including hyper-threading.
+If you want to explicitly specify the number of JVMs you can do so on the command
+line:
 
 ----------------------------
-mvn test -Dtests.jvms=8 test
+./gradlew test -Dtests.jvms=8
 ----------------------------
 
-Don't count hypercores for CPU-intense tests and leave some slack
-for JVM-internal threads (like the garbage collector). Make sure there is
-enough RAM to handle child JVMs.
+Or in `~/.gradle/gradle.properties`:
+
+----------------------------
+systemProp.tests.jvms=8
+----------------------------
+
+It's difficult to pick the "right" number here. Hypercores don't count for CPU
+intensive tests and you should leave some slack for JVM-internal threads like
+the garbage collector. And you have to have enough RAM to handle each JVM.
 
 === Test compatibility.
 
@@ -167,7 +300,7 @@ It is possible to provide a version that allows to adapt the tests behaviour
 to older features or bugs that have been changed or fixed in the meantime.
 
 -----------------------------------------
-mvn test -Dtests.compatibility=1.0.0
+./gradlew test -Dtests.compatibility=1.0.0
 -----------------------------------------
 
 
@@ -176,379 +309,502 @@ mvn test -Dtests.compatibility=1.0.0
 Run all tests without stopping on errors (inspect log files).
 
 -----------------------------------------
-mvn test -Dtests.haltonfailure=false test
+./gradlew test -Dtests.haltonfailure=false
 -----------------------------------------
 
 Run more verbose output (slave JVM parameters, etc.).
 
 ----------------------
-mvn test -verbose test
+./gradlew test -verbose
 ----------------------
 
 Change the default suite timeout to 5 seconds for all
 tests (note the exclamation mark).
 
 ---------------------------------------
-mvn test -Dtests.timeoutSuite=5000! ...
+./gradlew test -Dtests.timeoutSuite=5000! ...
 ---------------------------------------
 
-Change the logging level of ES (not mvn)
+Change the logging level of ES (not Gradle)
 
 --------------------------------
-mvn test -Des.logger.level=DEBUG
+./gradlew test -Dtests.es.logger.level=DEBUG
 --------------------------------
 
 Print all the logging output from the test runs to the commandline
 even if tests are passing.
 
 ------------------------------
-mvn test -Dtests.output=always
+./gradlew test -Dtests.output=always
 ------------------------------
 
 Configure the heap size.
 
 ------------------------------
-mvn test -Dtests.heap.size=512m
+./gradlew test -Dtests.heap.size=512m
 ------------------------------
 
 Pass arbitrary jvm arguments.
 
 ------------------------------
-mvn test -Dtests.jvm.argline="-XX:HeapDumpPath=/path/to/heapdumps"
+# specify heap dump path
+./gradlew test -Dtests.jvm.argline="-XX:HeapDumpPath=/path/to/heapdumps"
+# enable gc logging
+./gradlew test -Dtests.jvm.argline="-verbose:gc"
+# enable security debugging
+./gradlew test -Dtests.jvm.argline="-Djava.security.debug=access,failure"
 ------------------------------
 
-== Backwards Compatibility Tests
+Pass build arguments.
 
-Running backwards compatibility tests is disabled by default since it
-requires a release version of elasticsearch to be present on the test system.
-To run backwards compatibilty tests untar or unzip a release and run the tests
-with the following command:
+------------------------------
+# Run tests against a release build. License key must be provided, but usually can be anything.
+./gradlew test -Dbuild.snapshot=false -Dlicense.key="x-pack/license-tools/src/test/resources/public.key"
+------------------------------
 
----------------------------------------------------------------------------
-mvn test -Dtests.filter="@backwards" -Dtests.bwc.version=x.y.z -Dtests.bwc.path=/path/to/elasticsearch -Dtests.security.manager=false
----------------------------------------------------------------------------
+== Running verification tasks
 
-Note that backwards tests must be run with security manager disabled.
-If the elasticsearch release is placed under `./backwards/elasticsearch-x.y.z` the path
-can be omitted:
+To run all verification tasks, including static checks, unit tests, and integration tests:
 
 ---------------------------------------------------------------------------
-mvn test -Dtests.filter="@backwards" -Dtests.bwc.version=x.y.z -Dtests.security.manager=false
+./gradlew check
 ---------------------------------------------------------------------------
 
-To setup the bwc test environment execute the following steps (provided you are
-already in your elasticsearch clone):
+Note that this will also run the unit tests and precommit tasks first. If you want to just
+run the in memory cluster integration tests (because you are debugging them):
 
 ---------------------------------------------------------------------------
-$ mkdir backwards && cd backwards
-$ curl -O https://download.elasticsearch.org/elasticsearch/elasticsearch/elasticsearch-1.2.1.tar.gz
-$ tar -xzf elasticsearch-1.2.1.tar.gz
+./gradlew internalClusterTest
 ---------------------------------------------------------------------------
 
-== Running integration tests
-
-To run the integration tests:
+If you want to just run the precommit checks:
 
 ---------------------------------------------------------------------------
-mvn verify
+./gradlew precommit
 ---------------------------------------------------------------------------
 
-Note that this will also run the unit tests first. If you want to just
-run the integration tests only (because you are debugging them):
+Some of these checks will require `docker-compose` installed for bringing up
+test fixtures. If it's not present those checks will be skipped automatically.
+The host running Docker (or VM if you're using Docker Desktop) needs 4GB of
+memory or some of the containers will fail to start. You can tell that you
+are short of memory if containers are exiting quickly after starting with
+code 137 (128 + 9, where 9 means SIGKILL).
+
+== Debugging tests
+
+If you would like to debug your tests themselves, simply pass the `--debug-jvm`
+flag to the testing task and connect a debugger on the default port of `5005`.
 
 ---------------------------------------------------------------------------
-mvn verify -Dskip.unit.tests
+./gradlew :server:test --debug-jvm
+---------------------------------------------------------------------------
+
+For REST tests, if you'd like to debug the Elasticsearch server itself, and
+not your test code, use the `--debug-server-jvm` flag and use the
+"Debug Elasticsearch" run configuration in IntelliJ to listen on the default
+port of `5007`.
+
+---------------------------------------------------------------------------
+./gradlew :rest-api-spec:yamlRestTest --debug-server-jvm
+---------------------------------------------------------------------------
+
+NOTE: In the case of test clusters using multiple nodes, multiple debuggers
+will need to be attached on incrementing ports. For example, for a 3 node
+cluster ports `5007`, `5008`, and `5009` will attempt to attach to a listening
+debugger. You can use the "Debug Elasticsearch (node 2)" and "(node 3)" run
+configurations should you need to debug a multi-node cluster.
+
+You can also use a combination of both flags to debug both tests and server.
+This is only applicable to Java REST tests.
+
+---------------------------------------------------------------------------
+./gradlew :modules:kibana:javaRestTest --debug-jvm --debug-server-jvm
 ---------------------------------------------------------------------------
 
 == Testing the REST layer
 
-The available integration tests make use of the java API to communicate with
-the elasticsearch nodes, using the internal binary transport (port 9300 by
-default).
-The REST layer is tested through specific tests that are shared between all
-the elasticsearch official clients and consist of YAML files that describe the
+The REST layer is tested through specific tests that are executed against
+a cluster that is configured and initialized via Gradle. The tests
+themselves can be written in either Java or with a YAML based DSL.
+
+YAML based REST tests should be preferred since these are shared between all
+the elasticsearch official clients. The YAML based tests describe the
 operations to be executed and the obtained results that need to be tested.
 
-The REST tests are run automatically when executing the maven test command. To run only the
-REST tests use the following command:
+The YAML tests support various operators defined in the link:/rest-api-spec/src/yamlRestTest/resources/rest-api-spec/test/README.asciidoc[rest-api-spec] and adhere to the link:/rest-api-spec/README.markdown[Elasticsearch REST API JSON specification]
+In order to run the YAML tests, the relevant API specification needs
+to be on the test classpath. Any gradle project that has support for REST
+tests will get the primary API on it's class path. However, to better support
+Gradle incremental builds, it is recommended to explicitly declare which
+parts of the API the tests depend upon.
+
+For example:
+---------------------------------------------------------------------------
+restResources {
+  restApi {
+    includeCore '_common', 'indices', 'index', 'cluster', 'nodes', 'get', 'ingest'
+  }
+}
+---------------------------------------------------------------------------
+
+YAML REST tests that include x-pack specific APIs need to explicitly declare
+which APIs are required through a similar `includeXpack` configuration.
+
+The REST tests are run automatically when executing the "./gradlew check" command. To run only the
+YAML REST tests use the following command (modules and plugins may also include YAML REST tests):
 
 ---------------------------------------------------------------------------
-mvn verify -Dtests.filter="@Rest"
+./gradlew :rest-api-spec:yamlRestTest
 ---------------------------------------------------------------------------
 
-`RestNIT` are the executable test classes that runs all the
-yaml suites available within the `rest-api-spec` folder.
+A specific test case can be run with the following command:
 
-The REST tests support all the options provided by the randomized runner, plus the following:
+---------------------------------------------------------------------------
+./gradlew ':rest-api-spec:yamlRestTest' \
+  --tests "org.elasticsearch.test.rest.ClientYamlTestSuiteIT" \
+  -Dtests.method="test {yaml=cat.segments/10_basic/Help}"
+---------------------------------------------------------------------------
 
-* `tests.rest[true|false]`: determines whether the REST tests need to be run (default) or not.
-* `tests.rest.suite`: comma separated paths of the test suites to be run
-(by default loaded from /rest-api-spec/test). It is possible to run only a subset
-of the tests providing a sub-folder or even a single yaml file (the default
-/rest-api-spec/test prefix is optional when files are loaded from classpath)
-e.g. -Dtests.rest.suite=index,get,create/10_with_id
+You can run a group of YAML test by using wildcards:
+
+---------------------------------------------------------------------------
+./gradlew :rest-api-spec:yamlRestTest \
+  --tests "org.elasticsearch.test.rest.ClientYamlTestSuiteIT.test {yaml=index/*/*}"
+---------------------------------------------------------------------------
+
+or
+
+---------------------------------------------------------------------------
+./gradlew :rest-api-spec:yamlRestTest \
+  --tests org.elasticsearch.test.rest.ClientYamlTestSuiteIT -Dtests.method="test {yaml=cat.segments/10_basic/*}"
+---------------------------------------------------------------------------
+
+The latter method is preferable when the YAML suite name contains `.` (period).
+
+Note that if the selected test via the `--tests` filter is not a valid test, i.e., the YAML test
+runner is not able to parse and load it, you might get an error message indicating that the test
+was not found. In such cases, running the whole suite without using the `--tests` could show more
+specific error messages about why the test runner is not able to parse or load a certain test.
+
+The YAML REST tests support all the options provided by the randomized runner, plus the following:
+
 * `tests.rest.blacklist`: comma separated globs that identify tests that are
 blacklisted and need to be skipped
 e.g. -Dtests.rest.blacklist=index/*/Index document,get/10_basic/*
-* `tests.rest.spec`: REST spec path (default /rest-api-spec/api)
 
-Note that the REST tests, like all the integration tests, can be run against an external
-cluster by specifying the `tests.cluster` property, which if present needs to contain a
-comma separated list of nodes to connect to (e.g. localhost:9300). A transport client will
-be created based on that and used for all the before|after test operations, and to extract
-the http addresses of the nodes so that REST requests can be sent to them.
+Java REST tests can be run with the "javaRestTest" task.
 
-== Skip validate
-
-To disable validation step (forbidden API or `// NOCOMMIT`) use
-
+For example :
 ---------------------------------------------------------------------------
-mvn test -Dvalidate.skip=true
+./gradlew :modules:mapper-extras:javaRestTest
 ---------------------------------------------------------------------------
 
-You can also skip this by using the "dev" profile:
+A specific test case can be run with the following syntax (fqn.test {params}):
 
 ---------------------------------------------------------------------------
-mvn test -Pdev
+./gradlew ':modules:mapper-extras:javaRestTest' \
+  --tests "org.elasticsearch.index.mapper.TokenCountFieldMapperIntegrationIT.testSearchByTokenCount {storeCountedFields=true loadCountedFields=false}"
 ---------------------------------------------------------------------------
 
-== Testing scripts
+yamlRestTest's and javaRestTest's are easy to identify, since they are found in a
+respective source directory. However, there are some more specialized REST tests
+that use custom task names. These are usually found in "qa" projects commonly
+use the "integTest" task.
 
-The simplest way to test scripts and the packaged distributions is to use
-Vagrant. You can get started by following there five easy steps:
+If in doubt about which command to use, simply run <gradle path>:check
 
-. Install Virtual Box and Vagrant.
+== Testing packaging
 
-. (Optional) Install vagrant-cachier to squeeze a bit more performance out of
-the process:
+The packaging tests are run on different build vm cloud instances to verify
+that installing and running Elasticsearch distributions works correctly on
+supported operating systems. These tests should really only be run on ephemeral
+systems because they're destructive; that is, these tests install and remove
+packages and freely modify system settings, so you will probably regret it if
+you execute them on your development machine.
 
---------------------------------------
-vagrant plugin install vagrant-cachier
---------------------------------------
+=== Reproducing packaging tests
 
-. Validate your installed dependencies:
+To reproduce or debug packaging tests failures we recommend using using our provided https://github.com/elastic/elasticsearch-infra/blob/master/buildkite-tools/README.md[*buildkite tools*]
 
--------------------------------------
-mvn -Dtests.vagrant -pl qa/vagrant validate
--------------------------------------
+== Testing backwards compatibility
 
-. Download the VMs. Since Maven or ant or something eats the progress reports
-from Vagrant when you run it inside mvn its probably best if you run this one
-time to setup all the VMs one at a time. Run this to download and setup the VMs
-we use for testing by default:
-
---------------------------------------------------------
-vagrant up --provision trusty --provider virtualbox && vagrant halt trusty
-vagrant up --provision centos-7 --provider virtualbox && vagrant halt centos-7
---------------------------------------------------------
-
-or run this to download and setup all the VMs:
-
--------------------------------------------------------------------------------
-vagrant halt
-for box in $(vagrant status | grep 'poweroff\|not created' | cut -f1 -d' '); do
-  vagrant up --provision $box --provider virtualbox
-  vagrant halt $box
-done
--------------------------------------------------------------------------------
-
-. Smoke test the maven/ant dance that we use to get vagrant involved in
-integration testing is working:
-
----------------------------------------------
-mvn -Dtests.vagrant -Psmoke-vms -pl qa/vagrant verify
----------------------------------------------
-
-or this to validate all the VMs:
+Backwards compatibility tests exist to test upgrading from each supported version
+to the current version. To run them all use:
 
 -------------------------------------------------
-mvn -Dtests.vagrant=all -Psmoke-vms -pl qa/vagrant verify
+./gradlew bwcTest
 -------------------------------------------------
 
-That will start up the VMs and then immediate quit.
-
-. Finally run the tests. The fastest way to get this started is to run:
-
------------------------------------
-mvn clean install -DskipTests
-mvn -Dtests.vagrant -pl qa/vagrant verify
------------------------------------
-
-You could just run:
-
---------------------
-mvn -Dtests.vagrant verify
---------------------
-
-but that will run all the tests. Which is probably a good thing, but not always
-what you want.
-
-Whichever snippet you run mvn will build the tar, zip and deb packages. If you
-have rpmbuild installed it'll build the rpm package as well. Then mvn will
-spin up trusty and verify the tar, zip, and deb package. If you have rpmbuild
-installed it'll spin up centos-7 and verify the tar, zip and rpm packages. We
-chose those two distributions as the default because they cover deb and rpm
-packaging and SyvVinit and systemd.
-
-You can control the boxes that are used for testing like so. Run just
-fedora-22 with:
-
---------------------------------------------
-mvn -Dtests.vagrant -pl qa/vagrant verify -DboxesToTest=fedora-22
---------------------------------------------
-
-or run wheezy and trusty:
-
-------------------------------------------------------------------
-mvn -Dtests.vagrant -pl qa/vagrant verify -DboxesToTest='wheezy, trusty'
-------------------------------------------------------------------
-
-or run all the boxes:
-
----------------------------------------
-mvn -Dtests.vagrant=all -pl qa/vagrant verify
----------------------------------------
-
-Its important to know that if you ctrl-c any of these `mvn` runs that you'll
-probably leave a VM up. You can terminate it by running:
-
-------------
-vagrant halt
-------------
-
-This is just regular vagrant so you can run normal multi box vagrant commands
-to test things manually. Just run:
-
----------------------------------------
-vagrant up trusty --provider virtualbox && vagrant ssh trusty
----------------------------------------
-
-to get an Ubuntu or
-
--------------------------------------------
-vagrant up centos-7 --provider virtualbox && vagrant ssh centos-7
--------------------------------------------
-
-to get a CentOS. Once you are done with them you should halt them:
-
--------------------
-vagrant halt trusty
--------------------
-
-These are the linux flavors the Vagrantfile currently supports:
-
-* precise aka Ubuntu 12.04
-* trusty aka Ubuntu 14.04
-* vivid aka Ubuntun 15.04
-* wheezy aka Debian 7, the current debian oldstable distribution
-* jessie aka Debian 8, the current debina stable distribution
-* centos-6
-* centos-7
-* fedora-22
-* oel-7 aka Oracle Enterprise Linux 7
-
-We're missing the following from the support matrix because there aren't high
-quality boxes available in vagrant atlas:
-
-* sles-11
-* sles-12
-* opensuse-13
-* oel-6
-
-We're missing the follow because our tests are very linux/bash centric:
-
-* Windows Server 2012
-
-Its important to think of VMs like cattle: if they become lame you just shoot
-them and let vagrant reprovision them. Say you've hosed your precise VM:
-
-----------------------------------------------------
-vagrant ssh precise -c 'sudo rm -rf /bin'; echo oops
-----------------------------------------------------
-
-All you've got to do to get another one is
-
-----------------------------------------------
-vagrant destroy -f trusty && vagrant up trusty --provider virtualbox
-----------------------------------------------
-
-The whole process takes a minute and a half on a modern laptop, two and a half
-without vagrant-cachier.
-
-Its possible that some downloads will fail and it'll be impossible to restart
-them. This is a bug in vagrant. See the instructions here for how to work
-around it:
-https://github.com/mitchellh/vagrant/issues/4479
-
-Some vagrant commands will work on all VMs at once:
-
-------------------
-vagrant halt
-vagrant destroy -f
-------------------
-
-
-----------
-vagrant up
-----------
-
-would normally start all the VMs but we've prevented that because that'd
-consume a ton of ram.
-
-== Testing scripts more directly
-
-In general its best to stick to testing in vagrant because the bats scripts are
-destructive. When working with a single package its generally faster to run its
-tests in a tighter loop than maven provides. In one window:
-
---------------------------------
-mvn -pl distribution/rpm package
---------------------------------
-
-and in another window:
-
-----------------------------------------------------
-vagrant up centos-7 --provider virtualbox && vagrant ssh centos-7
-cd $RPM
-sudo bats $BATS/*rpm*.bats
-----------------------------------------------------
-
-If you wanted to retest all the release artifacts on a single VM you could:
+A specific version can be tested as well. For example, to test bwc with
+version 5.3.2 run:
 
 -------------------------------------------------
-# Build all the distributions fresh but skip recompiling elasticsearch:
-mvn -amd -pl distribution install -DskipTests
-# Copy them all the testroot
-mvn -Dtests.vagrant -pl qa/vagrant pre-integration-test
-vagrant up trusty --provider virtualbox && vagrant ssh trusty
-cd $TESTROOT
-sudo bats $BATS/*.bats
+./gradlew v5.3.2#bwcTest
 -------------------------------------------------
 
-== Coverage analysis
+Use -Dtests.class and -Dtests.method to run a specific bwcTest test.
+For example to run a specific tests from the x-pack rolling upgrade from 7.7.0:
+-------------------------------------------------
+./gradlew :x-pack:qa:rolling-upgrade:v7.7.0#bwcTest \
+ -Dtests.class=org.elasticsearch.upgrades.UpgradeClusterClientYamlTestSuiteIT \
+ -Dtests.method="test {p0=*/40_ml_datafeed_crud/*}"
+-------------------------------------------------
 
-Tests can be run instrumented with jacoco to produce a coverage report in
-`target/site/jacoco/`.
+Tests are ran for versions that are not yet released but with which the current version will be compatible with.
+These are automatically checked out and built from source.
+See link:./build-tools-internal/src/main/java/org/elasticsearch/gradle/BwcVersions.java[BwcVersions]
+and link:./distribution/bwc/build.gradle[distribution/bwc/build.gradle]
+for more information.
 
-Unit test coverage:
+When running `./gradlew check`, minimal bwc checks are also run against compatible versions that are not yet released.
+
+==== BWC Testing against a specific remote/branch
+
+Sometimes a backward compatibility change spans two versions.
+A common case is a new functionality that needs a BWC bridge in an unreleased versioned of a release branch (for example, 5.x).
+Another use case, since the introduction of serverless, is to test BWC against main in addition to the other released branches.
+To do so, specify the `bwc.refspec` remote and branch to use for the BWC build as `origin/main`.
+To test against main, you will also need to create a new version in link:./server/src/main/java/org/elasticsearch/Version.java[Version.java],
+increment `elasticsearch` in link:./build-tools-internal/version.properties[version.properties], and hard-code the `project.version` for ml-cpp
+in link:./x-pack/plugin/ml/build.gradle[ml/build.gradle].
+
+In general, to test the changes, you can instruct Gradle to build the BWC version from another remote/branch combination instead of pulling the release branch from GitHub.
+You do so using the `bwc.refspec.{VERSION}` system property:
+
+-------------------------------------------------
+./gradlew check -Dtests.bwc.refspec.8.15=origin/main
+-------------------------------------------------
+
+The branch needs to be available on the remote that the BWC makes of the
+repository you run the tests from. Using the remote is a handy trick to make
+sure that a branch is available and is up to date in the case of multiple runs.
+
+Example:
+
+Say you need to make a change to `main` and have a BWC layer in `5.x`. You
+will need to:
+. Create a branch called `index_req_change` off your remote `${remote}`. This
+will contain your change.
+. Create a branch called `index_req_bwc_5.x` off `5.x`. This will contain your bwc layer.
+. Push both branches to your remote repository.
+. Run the tests with `./gradlew check -Dbwc.remote=${remote} -Dbwc.refspec.5.x=index_req_bwc_5.x`.
+
+==== Skip fetching latest
+
+For some BWC testing scenarios, you want to use the local clone of the
+repository without fetching latest. For these use cases, you can set the system
+property `tests.bwc.git_fetch_latest` to `false` and the BWC builds will skip
+fetching the latest from the remote.
+
+== Testing in FIPS 140-2 mode
+
+We have a CI matrix job that periodically runs all our tests with the JVM configured
+to be FIPS 140-2 compliant with the use of the BouncyCastle FIPS approved Security Provider.
+FIPS 140-2 imposes certain requirements that affect how our tests should be set up or what
+can be tested. This section summarizes what one needs to take into consideration so that
+tests won't fail when run in fips mode.
+
+=== Muting tests in FIPS 140-2 mode
+
+If the following limitations cannot be observed, or there is a need to actually test some use
+case that is not available/allowed in fips mode, the test can be muted. For unit tests or Java
+rest tests one can use
+
+------------------------------------------------
+assumeFalse("Justification why this cannot be run in FIPS mode", inFipsJvm());
+------------------------------------------------
+
+For specific YAML rest tests one can use
+
+------------------------------------------------
+- skip:
+    features: fips_140
+    reason: "Justification why this cannot be run in FIPS mode"
+------------------------------------------------
+
+For disabling entire types of tests for subprojects, one can use for example:
+
+------------------------------------------------
+if (buildParams.inFipsJvm) {
+  // This test cluster is using a BASIC license and FIPS 140 mode is not supported in BASIC
+  tasks.named("javaRestTest").configure{enabled = false }
+}
+------------------------------------------------
+
+in `build.gradle`.
+
+=== Limitations
+
+The following should be taken into consideration when writing new tests or adjusting existing ones:
+
+==== TLS
+
+`JKS` and `PKCS#12` keystores cannot be used in FIPS mode. If the test depends on being able to use
+a keystore, it can be muted when needed ( see `ESTestCase#inFipsJvm` ). Alternatively, one can use
+PEM encoded files for keys and certificates for the tests or for setting up TLS in a test cluster.
+Also, when in FIPS 140 mode, hostname verification for TLS cannot be turned off so if you are using
+`*.verification_mode: none` , you'd need to mute the test in fips mode.
+
+When using TLS, ensure that private keys used are longer than 2048 bits, or mute the test in fips mode.
+
+==== Password hashing algorithm
+
+Test clusters are configured with `xpack.security.fips_mode.enabled` set to true. This means that
+FIPS 140-2 related bootstrap checks are enabled and the test cluster will fail to form if the
+password hashing algorithm is set to something else than a PBKDF2 based one. You can delegate the choice
+of algorithm to i.e. `SecurityIntegTestCase#getFastStoredHashAlgoForTests` if you don't mind the
+actual algorithm used, or depend on default values for the test cluster nodes.
+
+==== Password length
+
+While using `pbkdf2` as the password hashing algorithm, FIPS 140-2 imposes a requirement that
+passwords are longer than 14 characters. You can either ensure that all test user passwords in
+your test are longer than 14 characters and use i.e. `SecurityIntegTestCase#getFastStoredHashAlgoForTests`
+to randomly select a hashing algorithm, or use `pbkdf2_stretch` that doesn't have the same
+limitation.
+
+==== Keystore Password
+
+In FIPS 140-2 mode, the elasticsearch keystore needs to be password protected with a password
+of appropriate length. This is handled automatically in `fips.gradle` and the keystore is unlocked
+on startup by the test clusters tooling in order to have secure settings available. However, you
+might need to take into consideration that the keystore is password-protected with `keystore-password`
+if you need to interact with it in a test.
+
+== How to write good tests?
+
+=== Base classes for test cases
+
+There are multiple base classes for tests:
+
+* **`ESTestCase`**: The base class of all tests. It is typically extended
+  directly by unit tests.
+* **`ESSingleNodeTestCase`**: This test case sets up a cluster that has a
+  single node.
+* **`ESIntegTestCase`**: An internal integration test that starts nodes within the same JVM as the test.
+    These allow you to test functionality that is not exposed via the REST API, or for verifying a certain internal state.
+    Additionally, you can easily simulate tricky distributed setups that are difficult to do in REST tests.
+    If you only need to start one node, use `ESSingleNodeTestCase` instead, which is a much lighter test setup.
+* **`ESRestTestCase`**: An integration test that interacts with an external
+  cluster via the REST API. This is used for Java based REST tests. This should
+  be the first choice for writing integration tests as these tests run in a much more
+  realistic setup.
+* **`ESClientYamlSuiteTestCase` **: A subclass of `ESRestTestCase` used to run YAML based REST tests.
+
+=== Good practices
+
+==== What kind of tests should I write?
+
+Unit tests are the preferred way to test some functionality: most of the time
+they are simpler to understand, more likely to reproduce, and unlikely to be
+affected by changes that are unrelated to the piece of functionality that is
+being tested.
+
+The reason why `ESSingleNodeTestCase` exists is that all our components used to
+be very hard to set up in isolation, which had led us to having a number of
+integration tests but close to no unit tests. `ESSingleNodeTestCase` is a
+workaround for this issue which provides an easy way to spin up a node and get
+access to components that are hard to instantiate like `IndicesService`.
+Whenever practical, you should prefer unit tests.
+
+Many tests extend `ESIntegTestCase`, mostly because this is how most tests used
+to work in the early days of Elasticsearch. However the complexity of these
+tests tends to make them hard to debug. Whenever the functionality that is
+being tested isn't intimately dependent on how Elasticsearch behaves as a
+cluster, it is recommended to write unit tests or REST tests instead.
+
+In short, most new functionality should come with unit tests, and optionally
+REST tests to test integration.
+
+==== Refactor code to make it easier to test
+
+Unfortunately, a large part of our code base is still hard to unit test.
+Sometimes because some classes have lots of dependencies that make them hard to
+instantiate. Sometimes because API contracts make tests hard to write. Code
+refactors that make functionality easier to unit test are encouraged. If this
+sounds very abstract to you, you can have a look at
+https://github.com/elastic/elasticsearch/pull/16610[this pull request] for
+instance, which is a good example. It refactors `IndicesRequestCache` in such
+a way that:
+ - it no longer depends on objects that are hard to instantiate such as
+   `IndexShard` or `SearchContext`,
+ - time-based eviction is applied on top of the cache rather than internally,
+   which makes it easier to assert on what the cache is expected to contain at
+   a given time.
+
+=== Bad practices
+
+==== Use randomized-testing for coverage
+
+In general, randomization should be used for parameters that are not expected
+to affect the behavior of the functionality that is being tested. For instance
+the number of shards should not impact `date_histogram` aggregations, and the
+choice of the `store` type (`niofs` vs `mmapfs`) does not affect the results of
+a query. Such randomization helps improve confidence that we are not relying on
+implementation details of one component or specifics of some setup.
+
+However it should not be used for coverage. For instance if you are testing a
+piece of functionality that enters different code paths depending on whether
+the index has 1 shards or 2+ shards, then we shouldn't just test against an
+index with a random number of shards: there should be one test for the 1-shard
+case, and another test for the 2+ shards case.
+
+==== Abuse randomization in multi-threaded tests
+
+Multi-threaded tests are often not reproducible due to the fact that there is
+no guarantee on the order in which operations occur across threads. Adding
+randomization to the mix usually makes things worse and should be done with
+care.
+
+== Test coverage analysis
+
+Generating test coverage reports for Elasticsearch is currently not possible through Gradle.
+However, it _is_ possible to gain insight in code coverage using IntelliJ's built-in coverage
+analysis tool that can measure coverage upon executing specific tests.
+
+Test coverage reporting used to be possible with JaCoCo when Elasticsearch was using Maven
+as its build system. Since the switch to Gradle though, this is no longer possible, seeing as
+the code currently used to build Elasticsearch does not allow JaCoCo to recognize its tests.
+For more information on this, see the discussion in https://github.com/elastic/elasticsearch/issues/28867[issue #28867].
+
+== Building with extra plugins
+Additional plugins may be built alongside elasticsearch, where their
+dependency on elasticsearch will be substituted with the local elasticsearch
+build. To add your plugin, create a directory called elasticsearch-extra as
+a sibling of elasticsearch. Checkout your plugin underneath elasticsearch-extra
+and the build will automatically pick it up. You can verify the plugin is
+included as part of the build by checking the projects of the build.
 
 ---------------------------------------------------------------------------
-mvn -Dtests.coverage test jacoco:report
+./gradlew projects
 ---------------------------------------------------------------------------
 
-Integration test coverage:
+== Environment misc
 
----------------------------------------------------------------------------
-mvn -Dtests.coverage -Dskip.unit.tests verify jacoco:report
----------------------------------------------------------------------------
+There is a known issue with macOS localhost resolve strategy that can cause
+some integration tests to fail. This is because integration tests have timings
+for cluster formation, discovery, etc. that can be exceeded if name resolution
+takes a long time.
+To fix this, make sure you have your computer name (as returned by `hostname`)
+inside `/etc/hosts`, e.g.:
+....
+127.0.0.1       localhost ElasticMBP.local
+255.255.255.255 broadcasthost
+::1             localhost ElasticMBP.local`
+....
 
-Combined (Unit+Integration) coverage:
+== Benchmarking
 
----------------------------------------------------------------------------
-mvn -Dtests.coverage verify jacoco:report
----------------------------------------------------------------------------
+For changes that might affect the performance characteristics of Elasticsearch
+you should also run macrobenchmarks. We maintain a macrobenchmarking tool
+called https://github.com/elastic/rally[Rally]
+which you can use to measure the performance impact. It comes with a set of
+default benchmarks that we also
+https://elasticsearch-benchmarks.elastic.co/[run every night]. To get started,
+please see https://esrally.readthedocs.io/en/stable/[Rally's documentation].
 
-== Debugging from an IDE
+== Test doc builds
 
-If you want to run elasticsearch from your IDE, you should execute ./run.sh
-It opens a remote debugging port that you can connect with your IDE.
+The Elasticsearch docs are in AsciiDoc format. You can test and build the docs
+locally using the Elasticsearch documentation build process. See
+https://github.com/elastic/docs.

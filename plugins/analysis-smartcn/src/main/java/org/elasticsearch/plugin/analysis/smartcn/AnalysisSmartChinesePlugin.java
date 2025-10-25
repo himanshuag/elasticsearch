@@ -1,54 +1,48 @@
 /*
- * Licensed to Elasticsearch under one or more contributor
- * license agreements. See the NOTICE file distributed with
- * this work for additional information regarding copyright
- * ownership. Elasticsearch licenses this file to you under
- * the Apache License, Version 2.0 (the "License"); you may
- * not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
+ * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.plugin.analysis.smartcn;
 
-import org.elasticsearch.common.inject.Module;
-import org.elasticsearch.index.analysis.AnalysisModule;
-import org.elasticsearch.index.analysis.SmartChineseAnalysisBinderProcessor;
-import org.elasticsearch.indices.analysis.smartcn.SmartChineseIndicesAnalysisModule;
+import org.apache.lucene.analysis.Analyzer;
+import org.elasticsearch.index.analysis.AnalyzerProvider;
+import org.elasticsearch.index.analysis.TokenFilterFactory;
+import org.elasticsearch.index.analysis.TokenizerFactory;
+import org.elasticsearch.indices.analysis.AnalysisModule.AnalysisProvider;
+import org.elasticsearch.plugins.AnalysisPlugin;
 import org.elasticsearch.plugins.Plugin;
 
-import java.util.Collection;
-import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
-/**
- *
- */
-public class AnalysisSmartChinesePlugin extends Plugin {
+import static java.util.Collections.singletonMap;
 
+public class AnalysisSmartChinesePlugin extends Plugin implements AnalysisPlugin {
     @Override
-    public String name() {
-        return "analysis-smartcn";
+    public Map<String, AnalysisProvider<TokenFilterFactory>> getTokenFilters() {
+        Map<String, AnalysisProvider<TokenFilterFactory>> tokenFilters = new HashMap<>();
+        tokenFilters.put("smartcn_stop", SmartChineseStopTokenFilterFactory::new);
+        // TODO: deprecate and remove, this is a noop token filter; it's here for backwards compat before we had "smartcn_tokenizer"
+        tokenFilters.put("smartcn_word", SmartChineseNoOpTokenFilterFactory::new);
+        return tokenFilters;
     }
 
     @Override
-    public String description() {
-        return "Smart Chinese analysis support";
+    public Map<String, AnalysisProvider<TokenizerFactory>> getTokenizers() {
+        Map<String, AnalysisProvider<TokenizerFactory>> extra = new HashMap<>();
+        extra.put("smartcn_tokenizer", SmartChineseTokenizerTokenizerFactory::new);
+        // TODO: deprecate and remove, this is an alias to "smartcn_tokenizer"; it's here for backwards compat
+        extra.put("smartcn_sentence", SmartChineseTokenizerTokenizerFactory::new);
+        return extra;
     }
 
     @Override
-    public Collection<Module> nodeModules() {
-        return Collections.<Module>singletonList(new SmartChineseIndicesAnalysisModule());
-    }
-
-    public void onModule(AnalysisModule module) {
-        module.addProcessor(new SmartChineseAnalysisBinderProcessor());
+    public Map<String, AnalysisProvider<AnalyzerProvider<? extends Analyzer>>> getAnalyzers() {
+        return singletonMap("smartcn", SmartChineseAnalyzerProvider::new);
     }
 }

@@ -1,43 +1,72 @@
 {
   "put_script": {
-    "documentation": "http://www.elastic.co/guide/en/elasticsearch/reference/master/modules-scripting.html",
-    "methods": ["PUT", "POST"],
+    "documentation": {
+      "url": "https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-put-script",
+      "description": "Create or update a script or search template"
+    },
+    "stability": "stable",
+    "visibility": "public",
+    "headers": {
+      "accept": [
+        "application/json"
+      ],
+      "content_type": [
+        "application/json"
+      ]
+    },
     "url": {
-      "path": "/_scripts/{lang}/{id}",
-      "paths": [ "/_scripts/{lang}/{id}" ],
-      "parts": {
-        "id": {
-          "type" : "string",
-          "description" : "Script ID",
-          "required" : true
+      "paths": [
+        {
+          "path": "/_scripts/{id}",
+          "methods": [
+            "PUT",
+            "POST"
+          ],
+          "parts": {
+            "id": {
+              "type": "string",
+              "description": "Script ID"
+            }
+          }
         },
-        "lang" : {
-          "type" : "string",
-          "description" : "Script language",
-          "required" : true
+        {
+          "path": "/_scripts/{id}/{context}",
+          "methods": [
+            "PUT",
+            "POST"
+          ],
+          "parts": {
+            "id": {
+              "type": "string",
+              "description": "Script ID"
+            },
+            "context": {
+              "type": "string",
+              "description": "Script context"
+            }
+          }
         }
+      ]
+    },
+    "params": {
+      "timeout": {
+        "type": "time",
+        "default": "30s",
+        "description": "Explicit operation timeout"
       },
-      "params" : {
-        "op_type": {
-          "type" : "enum",
-          "options" : ["index", "create"],
-          "default" : "index",
-          "description" : "Explicit operation type"
-        },
-        "version": {
-          "type": "number",
-          "description": "Explicit version number for concurrency control"
-        },
-        "version_type": {
-          "type": "enum",
-          "options": ["internal", "external", "external_gte", "force"],
-          "description": "Specific version type"
-        }
+      "master_timeout": {
+        "type": "time",
+        "default": "30s",
+        "description": "Specify timeout for connection to master"
+      },
+      "context": {
+        "type": "string",
+        "description": "Context name to compile script against"
       }
     },
     "body": {
-      "description" : "The document",
-      "required" : true
+      "description": "The document",
+      "required": true
     }
   }
 }
